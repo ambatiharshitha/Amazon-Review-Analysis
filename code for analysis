@@ -1,0 +1,58 @@
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+import seaborn as sns
+import nltk
+from nltk.sentiment import SentimentIntensityAnalyzer
+from transformers import AutoTokenizer, AutoModelForSequenceClassification
+from scipy.special import softmax
+import torch
+from tqdm import tqdm
+
+# Load Data
+def load_data(filepath, nrows=500):
+    df = pd.read_csv(filepath).head(nrows)
+    return df
+
+# VADER Analysis
+def analyze_vader(df):
+    nltk.download("vader_lexicon")
+    sia = SentimentIntensityAnalyzer()
+    results = {row["Id"]: sia.polarity_scores(row["Text"]) for _, row in df.iterrows()}
+    return pd.DataFrame(results).T.reset_index().rename(columns={"index": "Id"})
+
+# RoBERTa Analysis
+MODEL = "cardiffnlp/twitter-roberta-base-sentiment"
+tokenizer = AutoTokenizer.from_pretrained(MODEL)
+model = AutoModelForSequenceClassification.from_pretrained(MODEL)
+
+def polarity_scores_roberta(text):
+    encoded_text = tokenizer(text, return_tensors="pt")
+    output = model(**encoded_text)
+    scores = softmax(output[0][0].detach().numpy())
+    return {"roberta_neg": scores[0], "roberta_neu": scores[1], "roberta_pos": scores[2]}
+
+def analyze_roberta(df):
+    results = {row["Id"]: polarity_scores_roberta(row["Text"]) for _, row in df.iterrows()}
+    return pd.DataFrame(results).T.reset_index().rename(columns={"index": "Id"})
+
+# Visualization
+def plot_sentiment(df, column, title):
+    plt.figure(figsize=(10, 5))
+    sns.barplot(data=df, x="Score", y=column)
+    plt.title(title)
+    plt.show()
+
+# Main Execution
+def main():
+    df = load_data("data/Reviews.csv", nrows=500)
+    vader_results = analyze_vader(df)
+    roberta_results = analyze_roberta(df)
+    vader_results.to_csv("data/vader_results.csv", index=False)
+    roberta_results.to_csv("data/roberta_results.csv", index=False)
+    plot_sentiment(vader_results, "compound", "VADER Sentiment Score by Review Stars")
+    plot_sentiment(roberta_results, "roberta_pos", "RoBERTa Positive Score by Review Stars")
+    print("Analysis Complete!")
+
+if __name__ == "__main__":
+    main()
